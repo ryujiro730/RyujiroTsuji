@@ -1,3 +1,5 @@
+// ✅ 修正済み MenuTabs.tsx + リプレイタブにメディア風操作ボタンを追加
+
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Rewind, Play, Pause, FastForward, Square } from "lucide-react"
 
 const TABS = ["インジケーター", "銘柄", "リプレイ", "プリセット", "口座", "トレードルール"]
 
@@ -37,7 +40,7 @@ export default function MenuTabs({ selectedSymbol, onSelectSymbol, selectedTab, 
     fetch("/api/symbols")
       .then((res) => res.json())
       .then((data) => setSymbols(data))
-      .catch((err) => console.error("⚠️ シンボル読み込み失敗", err))
+      .catch((err) => console.error("\u26a0\ufe0f シンボル読み込み失敗", err))
   }, [])
 
   return (
@@ -78,49 +81,107 @@ export default function MenuTabs({ selectedSymbol, onSelectSymbol, selectedTab, 
 
         if (tab === "インジケーター") {
           return (
-            <>
-              <Dialog key={tab} open={indicatorDialogOpen} onOpenChange={setIndicatorDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      onSelect("インジケーター")
-                      setIndicatorDialogOpen(true)
-                    }}
-                    className="text-sm font-medium px-3 py-1 rounded-none border-b-2 transition-all duration-150"
-                  >
-                    {tab}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-3xl">
-                  <DialogHeader>
-                    <DialogTitle>インジケーターを選択</DialogTitle>
-                  </DialogHeader>
-                  <div className="grid grid-cols-2 gap-4 pt-4">
-                    <div className="flex flex-col gap-1">
-                      <div className="font-medium text-sm">カテゴリ</div>
-                      <ul className="text-sm text-muted-foreground space-y-1">
-                        <li>トレンド</li>
-                        <li>オシレーター</li>
-                        <li>ボリューム</li>
-                        <li>ビル・ウィリアムズ</li>
-                      </ul>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="font-medium text-sm">インジケーター一覧</div>
-                      <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                        <Button variant="outline" size="sm">Moving Average</Button>
-                        <Button variant="outline" size="sm">Bollinger Bands</Button>
-                        <Button variant="outline" size="sm">Envelopes</Button>
-                        <Button variant="outline" size="sm">Ichimoku Kinko Hyo</Button>
-                        <Button variant="outline" size="sm">Parabolic SAR</Button>
-                        <Button variant="outline" size="sm">Standard Deviation</Button>
-                      </div>
+            <Dialog key={tab} open={indicatorDialogOpen} onOpenChange={setIndicatorDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    onSelect("インジケーター")
+                    setIndicatorDialogOpen(true)
+                  }}
+                  className="text-sm font-medium px-3 py-1 rounded-none border-b-2 transition-all duration-150"
+                >
+                  {tab}
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="w-full max-w-[1800px] min-w-[600px]">
+                <DialogHeader>
+                  <DialogTitle>インジケーターを選択</DialogTitle>
+                </DialogHeader>
+                <div className="grid grid-cols-2 gap-4 pt-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="font-medium text-sm">カテゴリ</div>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                      <li>トレンド</li>
+                      <li>オシレーター</li>
+                      <li>ボリューム</li>
+                      <li>ビル・ウィリアムズ</li>
+                    </ul>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="font-medium text-sm">インジケーター一覧</div>
+                    <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto">
+                      {["Moving Average", "Bollinger Bands", "Envelopes", "Ichimoku Kinko Hyo", "Parabolic SAR", "Standard Deviation"].map((name) => (
+                        <Button key={name} variant="outline" size="sm">{name}</Button>
+                      ))}
                     </div>
                   </div>
-                </DialogContent>
-              </Dialog>
-            </>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )
+        }
+
+        if (tab === "リプレイ") {
+          return (
+            <Popover key={tab}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  onClick={() => onSelect("リプレイ")}
+                  className="text-sm font-medium px-3 py-1 rounded-none border-b-2 transition-all duration-150"
+                >
+                  {tab}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-60 p-4 flex justify-between items-center space-x-2">
+                <Button size="icon" variant="outline">
+                  <Rewind className="w-5 h-5" />
+                </Button>
+                <Button size="icon" variant="outline">
+                  <Play className="w-5 h-5" />
+                </Button>
+                <Button size="icon" variant="outline">
+                  <Pause className="w-5 h-5" />
+                </Button>
+                <Button size="icon" variant="outline">
+                  <Square className="w-5 h-5" />
+                </Button>
+                <Button size="icon" variant="outline">
+                  <FastForward className="w-5 h-5" />
+                </Button>
+              </PopoverContent>
+            </Popover>
+          )
+        }
+
+        if (tab === "プリセット") {
+          return (
+            <Popover key={tab}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  onClick={() => onSelect("プリセット")}
+                  className="text-sm font-medium px-3 py-1 rounded-none border-b-2 transition-all duration-150"
+                >
+                  {tab}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-60 bg-gray-100 border border-gray-300 p-4 space-y-2">
+                {["プリセット1", "プリセット2", "プリセット3", "プリセット4", "プリセット5", "プリセット6", "プリセット7"].map((preset, index) => (
+                  <Button
+                    key={`preset-${index}`}
+                    variant="outline"
+                    className="w-full justify-start text-base font-bold text-black"
+                    onClick={() => {
+                      console.log(`✅ ${preset} clicked`)
+                    }}
+                  >
+                    {preset}
+                  </Button>
+                ))}
+              </PopoverContent>
+            </Popover>
           )
         }
 
@@ -149,9 +210,9 @@ export default function MenuTabs({ selectedSymbol, onSelectSymbol, selectedTab, 
                   <div className="grid grid-cols-3 gap-2">
                     {[1000, 5000, 10000, 20000, 50000, 100000, 200000, 500000].map((amount) => (
                       <Button
-                        key={amount}
+                        key={`amount-${amount}`}
                         variant="outline"
-                        onClick={() => addBalance(amount)}
+                        onClick={() => setBalance(balance + amount)}
                       >
                         {amount.toLocaleString()}円
                       </Button>
