@@ -55,7 +55,7 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
       if (chartRef.current) chartRef.current.remove()
       chartRef.current = createChart(chartContainerRef.current, {
         width: chartContainerRef.current.clientWidth,
-        height: 400,
+        height: 800,
         layout: { backgroundColor: "#f5f5f5", textColor: "#000" },
         rightPriceScale: { visible: true },
         timeScale: { rightOffset: 10, barSpacing: 8, fixLeftEdge: true },
@@ -63,7 +63,6 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
 
       candleSeriesRef.current = chartRef.current.addCandlestickSeries()
 
-      // 初期表示（最新500本）
       const initial = await conn.query(`
         SELECT Datetime, open, high, low, close 
         FROM candles 
@@ -87,25 +86,22 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
       allCandlesRef.current = rows
       candleSeriesRef.current.setData(rows)
 
-      let lastRequestedFrom = Number.POSITIVE_INFINITY
-
       chartRef.current.timeScale().subscribeVisibleLogicalRangeChange(
         async (range: LogicalRange | null) => {
           if (!range || !connRef.current || !candleSeriesRef.current) return
 
-          const oldestTime = allCandlesRef.current.length > 0
-            ? allCandlesRef.current[0].time
-            : Math.floor(Date.now() / 1000)
+          const candles = allCandlesRef.current
+          const indexFrom = Math.floor(range.from ?? 0)
+          const indexTo = Math.ceil(range.to ?? 0)
 
-          if (oldestTime >= lastRequestedFrom) return
-          lastRequestedFrom = oldestTime
+          const fromTime = (candles[indexFrom]?.time ?? candles[0].time) - 30 * 24 * 60 * 60
+          const toTime = (candles[indexTo]?.time ?? candles.at(-1)?.time ?? candles[0].time) + 30 * 24 * 60 * 60
 
           const query = `
             SELECT Datetime, open, high, low, close
             FROM candles
-            WHERE Datetime < TO_TIMESTAMP(${oldestTime})
-            ORDER BY Datetime DESC
-            LIMIT 300
+            WHERE EPOCH(Datetime) BETWEEN ${fromTime} AND ${toTime}
+            ORDER BY Datetime ASC
           `
 
           try {
@@ -127,11 +123,11 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
             }
 
             if (newRows.length > 0) {
-              allCandlesRef.current = [...newRows.reverse(), ...allCandlesRef.current]
+              allCandlesRef.current = [...allCandlesRef.current, ...newRows].sort((a, b) => a.time - b.time)
               candleSeriesRef.current.setData(allCandlesRef.current)
             }
           } catch (err) {
-            console.error("過去データ取得エラー", err)
+            console.error("データ取得エラー", err)
           }
         }
       )
