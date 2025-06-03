@@ -9,12 +9,17 @@ import {
   LogicalRange,
 } from "lightweight-charts"
 import * as duckdb from "@duckdb/duckdb-wasm"
+import TradeButtons from "@/components/TradeButtons"
 
 const TIMEFRAMES = [
   { label: "1分", value: "m1" },
+  { label: "5分", value: "m5" },
   { label: "15分", value: "m15" },
   { label: "1時間", value: "h1" },
+  { label: "4時間", value: "h4" },
   { label: "日", value: "d1" },
+  { label: "週", value: "w1" },
+  { label: "月", value: "mn1" },
 ]
 
 export default function MainChart({ selectedSymbol }: { selectedSymbol: string }) {
@@ -26,6 +31,7 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
   const loadedTimestampsRef = useRef<Set<number>>(new Set())
   const allCandlesRef = useRef<CandlestickData[]>([])
   const [timeframe, setTimeframe] = useState("m15")
+  const [latestPrice, setLatestPrice] = useState<{ sell: number; buy: number } | null>(null)
 
   useEffect(() => {
     if (!selectedSymbol || !chartContainerRef.current) return
@@ -37,18 +43,22 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
     }
 
     const init = async () => {
-      const worker = new Worker(bundle.mainWorker, { type: "module" })
-      const logger = new duckdb.ConsoleLogger()
-      const db = new duckdb.AsyncDuckDB(logger, worker)
-      await db.instantiate(bundle.mainModule, bundle.pthreadWorker)
-      dbRef.current = db
+      if (!dbRef.current) {
+        const worker = new Worker(bundle.mainWorker, { type: "module" })
+        const logger = new duckdb.ConsoleLogger()
+        const db = new duckdb.AsyncDuckDB(logger, worker)
+        await db.instantiate(bundle.mainModule, bundle.pthreadWorker)
+        dbRef.current = db
+      }
 
-      const conn = await db.connect()
+      const conn = await dbRef.current.connect()
       connRef.current = conn
 
       const filePath = `/data/${selectedSymbol}/${timeframe}/${selectedSymbol}-${timeframe}.parquet`
+
+      await conn.query("DROP TABLE IF EXISTS candles")
       await conn.query(`
-        CREATE OR REPLACE TABLE candles AS 
+        CREATE TABLE candles AS
         SELECT * FROM read_parquet('${window.location.origin}${filePath}')
       `)
 
@@ -62,12 +72,14 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
       })
 
       candleSeriesRef.current = chartRef.current.addCandlestickSeries()
+      loadedTimestampsRef.current.clear()
+      allCandlesRef.current = []
 
       const initial = await conn.query(`
-        SELECT Datetime, open, high, low, close 
-        FROM candles 
+        SELECT Datetime, open, high, low, close
+        FROM candles
         WHERE Datetime IS NOT NULL
-        ORDER BY Datetime DESC 
+        ORDER BY Datetime DESC
         LIMIT 500
       `)
 
@@ -85,6 +97,10 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
 
       allCandlesRef.current = rows
       candleSeriesRef.current.setData(rows)
+      if (rows.length > 0) {
+        const lastClose = rows[rows.length - 1].close
+        setLatestPrice({ sell: lastClose - 0.0075, buy: lastClose + 0.0075 })
+      }
 
       chartRef.current.timeScale().subscribeVisibleLogicalRangeChange(
         async (range: LogicalRange | null) => {
@@ -103,7 +119,6 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
             WHERE EPOCH(Datetime) BETWEEN ${fromTime} AND ${toTime}
             ORDER BY Datetime ASC
           `
-
           try {
             const result = await connRef.current.query(query)
             const newRows: CandlestickData[] = []
@@ -125,6 +140,8 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
             if (newRows.length > 0) {
               allCandlesRef.current = [...allCandlesRef.current, ...newRows].sort((a, b) => a.time - b.time)
               candleSeriesRef.current.setData(allCandlesRef.current)
+              const lastClose = allCandlesRef.current[allCandlesRef.current.length - 1].close
+              setLatestPrice({ sell: lastClose - 0.0075, buy: lastClose + 0.0075 })
             }
           } catch (err) {
             console.error("データ取得エラー", err)
@@ -150,11 +167,22 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
         ))}
       </div>
       <div className="w-full h-[400px] mt-0 px-4">
-        <div
-          ref={chartContainerRef}
-          className="w-full h-[400px] border rounded bg-gray-100"
-          style={{ marginTop: 0, paddingTop: 0 }}
-        />
+        <div className="relative w-full h-[400px] border rounded bg-gray-100">
+          <div
+            ref={chartContainerRef}
+            className="w-full h-full"
+          />
+          {latestPrice && (
+            <div className="absolute top-0 left-50 z-50">
+              <TradeButtons
+                sellPrice={latestPrice.sell}
+                buyPrice={latestPrice.buy}
+                onSellClick={() => console.log("Sell Order at", latestPrice.sell)}
+                onBuyClick={() => console.log("Buy Order at", latestPrice.buy)}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
