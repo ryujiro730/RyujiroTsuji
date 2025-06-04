@@ -7,9 +7,12 @@ import {
   ISeriesApi,
   CandlestickData,
   LogicalRange,
+  LineData,
 } from "lightweight-charts"
 import * as duckdb from "@duckdb/duckdb-wasm"
 import TradeButtons from "@/components/TradeButtons"
+import IndicatorDialog from "./dalogs/IndicatorDialog"
+import axios from "axios"
 
 const TIMEFRAMES = [
   { label: "1分", value: "m1" },
@@ -22,19 +25,65 @@ const TIMEFRAMES = [
   { label: "月", value: "mn1" },
 ]
 
-export default function MainChart({ selectedSymbol }: { selectedSymbol: string }) {
+export default function MainChart({
+  selectedSymbol,
+  selectedTimeframe,
+  chartHeight,
+}: {
+  selectedSymbol: string
+  selectedTimeframe: string
+  chartHeight: number
+}) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
+  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map())
   const dbRef = useRef<duckdb.AsyncDuckDB | null>(null)
   const connRef = useRef<duckdb.AsyncConnection | null>(null)
   const loadedTimestampsRef = useRef<Set<number>>(new Set())
   const allCandlesRef = useRef<CandlestickData[]>([])
   const [timeframe, setTimeframe] = useState("m15")
   const [latestPrice, setLatestPrice] = useState<{ sell: number; buy: number } | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [indicatorSettings, setIndicatorSettings] = useState<Record<string, any>>({})
+
+useEffect(() => {
+  console.log("📌 useEffect: indicatorSettings changed", indicatorSettings)
+
+  if (!chartRef.current) return
+
+  const dummy = [
+    {
+      name: "Test MA",
+      data: Array.from({ length: 100 }, (_, i) => ({
+        time: Math.floor(Date.now() / 1000) - (100 - i) * 60,
+        value: 100 + Math.sin(i / 10) * 5,
+      })),
+    },
+  ]
+
+  dummy.forEach((indicator) => {
+    const series = chartRef.current!.addLineSeries({
+      color: "blue",
+      lineWidth: 2,
+      title: indicator.name,
+    })
+    series.setData(indicator.data)
+  })
+
+  console.log("✅ ダミーインジケータ描画完了")
+}, [indicatorSettings])
+
+
 
   useEffect(() => {
     if (!selectedSymbol || !chartContainerRef.current) return
+
+    const container = chartContainerRef.current
+    const containerHeight = container.clientHeight
+    const containerWidth = container.clientWidth
+
+    if (containerHeight === 0 || containerWidth === 0) return
 
     const bundle: duckdb.Bundle = {
       mainModule: "/duckdb/duckdb-mvp.wasm",
@@ -62,10 +111,13 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
         SELECT * FROM read_parquet('${window.location.origin}${filePath}')
       `)
 
-      if (chartRef.current) chartRef.current.remove()
-      chartRef.current = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth,
-        height: 800,
+      if (chartRef.current) {
+        chartRef.current.remove()
+      }
+
+      chartRef.current = createChart(container, {
+        width: containerWidth,
+        height: containerHeight,
         layout: { backgroundColor: "#f5f5f5", textColor: "#000" },
         rightPriceScale: { visible: true },
         timeScale: { rightOffset: 10, barSpacing: 8, fixLeftEdge: true },
@@ -119,6 +171,7 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
             WHERE EPOCH(Datetime) BETWEEN ${fromTime} AND ${toTime}
             ORDER BY Datetime ASC
           `
+
           try {
             const result = await connRef.current.query(query)
             const newRows: CandlestickData[] = []
@@ -151,10 +204,15 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
     }
 
     init()
-  }, [selectedSymbol, timeframe])
+
+    return () => {
+      chartRef.current?.remove()
+      chartRef.current = null
+    }
+  }, [selectedSymbol, timeframe, chartHeight])
 
   return (
-    <div className="w-full">
+    <div className="w-full h-full overflow-hidden">
       <div className="flex gap-2 px-4 pt-0">
         {TIMEFRAMES.map((tf) => (
           <button
@@ -165,12 +223,18 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
             {tf.label}
           </button>
         ))}
+        <button
+          onClick={() => setDialogOpen(true)}
+          className="ml-auto px-3 py-1 rounded text-sm border bg-blue-500 text-white"
+        >
+          インジケータ設定
+        </button>
       </div>
-      <div className="w-full h-[400px] mt-0 px-4">
-        <div className="relative w-full h-[400px] border rounded bg-gray-100">
+      <div className="w-full h-full mt-0 px-4">
+        <div className="relative w-full h-full border rounded bg-gray-100">
           <div
             ref={chartContainerRef}
-            className="w-full h-full"
+            className="w-full h-full box-border"
           />
           {latestPrice && (
             <div className="absolute top-0 left-50 z-50">
@@ -184,6 +248,16 @@ export default function MainChart({ selectedSymbol }: { selectedSymbol: string }
           )}
         </div>
       </div>
+      <IndicatorDialog
+        tab="インジケータ"
+        dialogOpen={dialogOpen}
+        setDialogOpen={setDialogOpen}
+        onSelect={(newSettings) => {
+          const cloned = structuredClone(newSettings)
+          console.log("🚀 onSelectで受け取った設定:", cloned)
+          setIndicatorSettings(cloned)
+        }}
+      />
     </div>
   )
 }
