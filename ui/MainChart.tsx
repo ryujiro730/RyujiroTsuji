@@ -1,18 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, forwardRef } from "react"
 import {
   createChart,
   IChartApi,
   ISeriesApi,
   CandlestickData,
   LogicalRange,
-  LineData,
 } from "lightweight-charts"
 import * as duckdb from "@duckdb/duckdb-wasm"
-import TradeButtons from "@/components/TradeButtons"
-import IndicatorDialog from "./dalogs/IndicatorDialog"
-import axios from "axios"
 
 const TIMEFRAMES = [
   { label: "1分", value: "m1" },
@@ -25,57 +21,31 @@ const TIMEFRAMES = [
   { label: "月", value: "mn1" },
 ]
 
-export default function MainChart({
-  selectedSymbol,
-  selectedTimeframe,
-  chartHeight,
-}: {
+type Props = {
   selectedSymbol: string
   selectedTimeframe: string
   chartHeight: number
-}) {
+}
+
+const CandleChart = forwardRef<any, Props>(function CandleChart(
+  { selectedSymbol, selectedTimeframe, chartHeight },
+  ref
+) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+  const [timeframe, setTimeframe] = useState(selectedTimeframe || "m15")
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null)
-  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map())
   const dbRef = useRef<duckdb.AsyncDuckDB | null>(null)
   const connRef = useRef<duckdb.AsyncConnection | null>(null)
   const loadedTimestampsRef = useRef<Set<number>>(new Set())
   const allCandlesRef = useRef<CandlestickData[]>([])
-  const [timeframe, setTimeframe] = useState("m15")
-  const [latestPrice, setLatestPrice] = useState<{ sell: number; buy: number } | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [indicatorSettings, setIndicatorSettings] = useState<Record<string, any>>({})
-
-useEffect(() => {
-  console.log("📌 useEffect: indicatorSettings changed", indicatorSettings)
-
-  if (!chartRef.current) return
-
-  const dummy = [
-    {
-      name: "Test MA",
-      data: Array.from({ length: 100 }, (_, i) => ({
-        time: Math.floor(Date.now() / 1000) - (100 - i) * 60,
-        value: 100 + Math.sin(i / 10) * 5,
-      })),
-    },
-  ]
-
-  dummy.forEach((indicator) => {
-    const series = chartRef.current!.addLineSeries({
-      color: "blue",
-      lineWidth: 2,
-      title: indicator.name,
-    })
-    series.setData(indicator.data)
-  })
-
-  console.log("✅ ダミーインジケータ描画完了")
-}, [indicatorSettings])
+  const [dragHeight, setDragHeight] = useState(chartHeight)
 
 
 
+  // === チャート初期化・キャンドル ===
   useEffect(() => {
     if (!selectedSymbol || !chartContainerRef.current) return
 
@@ -146,29 +116,28 @@ useEffect(() => {
           close: row.close,
         }
       }).reverse()
-
+    if (!mounted) {
+    return <div style={{ height: chartHeight }} />
+    }
       allCandlesRef.current = rows
       candleSeriesRef.current.setData(rows)
-      if (rows.length > 0) {
-        const lastClose = rows[rows.length - 1].close
-        setLatestPrice({ sell: lastClose - 0.0075, buy: lastClose + 0.0075 })
-      }
+      chartRef.current.timeScale().fitContent()
 
+      // スクロール時の追加データロード（任意、不要なら削除してもOK）
       chartRef.current.timeScale().subscribeVisibleLogicalRangeChange(
         async (range: LogicalRange | null) => {
           if (!range || !connRef.current || !candleSeriesRef.current) return
 
-          const candles = allCandlesRef.current
-          const indexFrom = Math.floor(range.from ?? 0)
-          const indexTo = Math.ceil(range.to ?? 0)
+          const fromIndex = Math.max(0, Math.floor(range.from ?? 0))
+          const toIndex = Math.min(allCandlesRef.current.length - 1, Math.ceil(range.to ?? 0))
 
-          const fromTime = (candles[indexFrom]?.time ?? candles[0].time) - 30 * 24 * 60 * 60
-          const toTime = (candles[indexTo]?.time ?? candles.at(-1)?.time ?? candles[0].time) + 30 * 24 * 60 * 60
+          const fromTime = allCandlesRef.current[fromIndex]?.time ?? allCandlesRef.current[0]?.time
+          const toTime = allCandlesRef.current[toIndex]?.time ?? allCandlesRef.current.at(-1)?.time ?? fromTime
 
           const query = `
             SELECT Datetime, open, high, low, close
             FROM candles
-            WHERE EPOCH(Datetime) BETWEEN ${fromTime} AND ${toTime}
+            WHERE EPOCH(Datetime) BETWEEN ${fromTime - 30 * 86400} AND ${toTime + 30 * 86400}
             ORDER BY Datetime ASC
           `
 
@@ -193,8 +162,6 @@ useEffect(() => {
             if (newRows.length > 0) {
               allCandlesRef.current = [...allCandlesRef.current, ...newRows].sort((a, b) => a.time - b.time)
               candleSeriesRef.current.setData(allCandlesRef.current)
-              const lastClose = allCandlesRef.current[allCandlesRef.current.length - 1].close
-              setLatestPrice({ sell: lastClose - 0.0075, buy: lastClose + 0.0075 })
             }
           } catch (err) {
             console.error("データ取得エラー", err)
@@ -212,8 +179,8 @@ useEffect(() => {
   }, [selectedSymbol, timeframe, chartHeight])
 
   return (
-    <div className="w-full h-full overflow-hidden">
-      <div className="flex gap-2 px-4 pt-0">
+    <div className="w-full h-full flex flex-col px-4">
+      <div className="flex gap-2 pt-2 pb-2">
         {TIMEFRAMES.map((tf) => (
           <button
             key={tf.value}
@@ -223,41 +190,16 @@ useEffect(() => {
             {tf.label}
           </button>
         ))}
-        <button
-          onClick={() => setDialogOpen(true)}
-          className="ml-auto px-3 py-1 rounded text-sm border bg-blue-500 text-white"
-        >
-          インジケータ設定
-        </button>
       </div>
-      <div className="w-full h-full mt-0 px-4">
-        <div className="relative w-full h-full border rounded bg-gray-100">
-          <div
-            ref={chartContainerRef}
-            className="w-full h-full box-border"
-          />
-          {latestPrice && (
-            <div className="absolute top-0 left-50 z-50">
-              <TradeButtons
-                sellPrice={latestPrice.sell}
-                buyPrice={latestPrice.buy}
-                onSellClick={() => console.log("Sell Order at", latestPrice.sell)}
-                onBuyClick={() => console.log("Buy Order at", latestPrice.buy)}
-              />
-            </div>
-          )}
-        </div>
+      <div className="relative w-full border rounded bg-gray-100" style={{ height: dragHeight }}>
+        <div ref={chartContainerRef} className="w-full h-full box-border" />
       </div>
-      <IndicatorDialog
-        tab="インジケータ"
-        dialogOpen={dialogOpen}
-        setDialogOpen={setDialogOpen}
-        onSelect={(newSettings) => {
-          const cloned = structuredClone(newSettings)
-          console.log("🚀 onSelectで受け取った設定:", cloned)
-          setIndicatorSettings(cloned)
-        }}
+      <div
+        className="w-full cursor-row-resize bg-gray-300"
+        style={{ height: "6px" }}
       />
     </div>
   )
-}
+})
+
+export default CandleChart
