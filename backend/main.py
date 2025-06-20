@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import talib
-from logic.backtest import run_backtest
+from .logic.run_backtest import run_backtest
+
 
 app = FastAPI()
 
@@ -29,9 +30,20 @@ class IndicatorRequest(BaseModel):
 
 @app.post("/api/indicators")
 async def calc_indicators(req: IndicatorRequest):
-    df = pd.read_csv(f"data/{req.symbol}_{req.timeframe}.csv", parse_dates=["Datetime"])
-    df["timestamp"] = df["Datetime"].astype("int64") // 10**9
+    parquet_path = f"ui/ui/public/data/{req.symbol}/{req.timeframe}/{req.symbol}-{req.timeframe}.parquet"
+    df = pd.read_parquet(parquet_path)
 
+    df["timestamp"] = df["Datetime"].astype("int64") // 10**9
+    print("columns:", df.columns)
+    print("close dtype:", df["close"].dtype)
+    print("first closes:", df["close"].head(10))
+    print("first datetimes:", df["Datetime"].head(10))
+    print("first timestamps:", df["timestamp"].head(10))
+
+    # 例えばMoving Averageだけテスト
+    values = talib.SMA(df["close"], timeperiod=14)
+    print("first SMA values:", values.head(20))
+    print("number of notna in SMA:", values.notna().sum())
     result = []
 
     for name, params in req.indicators.items():
